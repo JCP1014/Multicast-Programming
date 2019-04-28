@@ -16,9 +16,7 @@ int sd;
 //char databuf[1024] = "Multicast test message.";
 char databuf[1035] = {0};
 int datalen = sizeof(databuf);
-char fileName[256] = "video.mp4";
-
-char *server_fec(char *data, unsigned int length);
+char fileName[256] = "test_input.JPG";
 
 int main(int argc, char *argv[])
 {
@@ -80,11 +78,12 @@ int main(int argc, char *argv[])
 
 	long number = 0;
 	char num_str[11] = {0};
+	char byte_str[5] = {0};
 	FILE *fp = NULL;
+	char sendbuf[1040] = {0};
 	char readbuf[1024] = {0};
-	char *saveptr = NULL;
 
-	unsigned int n = sizeof(readbuf);				// original data length (bytes)
+	unsigned int n = sizeof(sendbuf);				// original data length (bytes)
 	fec_scheme fs = LIQUID_FEC_HAMMING74;			// error-correcting scheme
 	unsigned int k = fec_get_enc_msg_length(fs, n); // Compute sizeof encoded message
 	unsigned char msg_enc[k];
@@ -100,15 +99,6 @@ int main(int argc, char *argv[])
 	else
 		printf("Sending length message...OK\n");
 
-	/*sprintf(num_str, "%ld", number);
-	strncat(num_str, "/", sizeof(char));
-	memset(databuf, 0, datalen);
-	strncat(databuf, num_str, strlen(num_str));*/
-	/*printf("data = %s\n",databuf);
-	strtok_r(databuf,"/",&saveptr);
-	printf("after = %s\n",databuf);
-	printf("save = %s\n",saveptr);*/
-
 	/* Send file */
 	fp = fopen(fileName, "rb");
 	if (fp == NULL)
@@ -116,32 +106,38 @@ int main(int argc, char *argv[])
 		printf("Error openning file.\n");
 		return -1;
 	}
+
 	while (!feof(fp))
 	{
 		/* Set the serial number of this packet */
-		/*number++;
-		sprintf(num_str, "%ld", number);
+		number++;
+		snprintf(num_str, sizeof(num_str), "%010ld", number);
+		//printf("number = %ld\n", strtol(num_str,NULL,10));
 		printf("number = %s\n", num_str);
-		strncat(num_str, "/", sizeof(char));
-		strncat(databuf, num_str, strlen(num_str));*/
-
-		fread(readbuf, sizeof(readbuf), 1, fp);
-
+		memcpy(sendbuf, num_str, sizeof(num_str));
+		//printf("%s\n",databuf);
+		int bytes = fread(readbuf,1,sizeof(readbuf), fp);
+		snprintf(byte_str, sizeof(byte_str),"%04d", bytes);
+		//printf("bytes = %s\n", byte_str);
+		memcpy(sendbuf+11, byte_str, sizeof(num_str));
+		memcpy(sendbuf+16, readbuf, sizeof(readbuf));
 		// Encode meesage
-		//fec_encode(q, n, readbuf, msg_enc);
+		fec_encode(q, n, sendbuf, msg_enc);
 
 		//strncat(databuf, readbuf, sizeof(readbuf));
-		sendto(sd, readbuf, sizeof(readbuf), 0, (struct sockaddr *)&groupSock, sizeof(groupSock));
-		number++;
-		printf("number = %ld\n",number);
+		sendto(sd, msg_enc, sizeof(msg_enc), 0, (struct sockaddr *)&groupSock, sizeof(groupSock));
+		//number++;
+		//printf("number = %ld\n",number);
 		memset(readbuf, 0, sizeof(readbuf));
 		memset(msg_enc, 0, sizeof(msg_enc));
+		memset(sendbuf, 0, sizeof(sendbuf));
 	}
 	fclose(fp);
 	// Destroy the fec object
 	fec_destroy(q);
 	sendto(sd, "EOF", 3, 0, (struct sockaddr *)&groupSock, sizeof(groupSock));
-	memset(databuf, 0, datalen);
+	
+	//memset(databuf, 0, datalen);
 	/* Try the re-read from the socket if the loopback is not disable
 	if(read(sd, databuf, datalen) < 0)
 	{
@@ -157,26 +153,4 @@ int main(int argc, char *argv[])
 	
 	close(sd);
 	return 0;
-}
-
-char *server_fec(char *data, unsigned int length)
-{
-	unsigned int n = length;						// original data length (bytes)
-	fec_scheme fs = LIQUID_FEC_HAMMING74;			// error-correcting scheme
-	unsigned int k = fec_get_enc_msg_length(fs, n); // Compute sizepf encoded message
-
-	// Create arrays
-	unsigned char msg_enc[k];
-
-	// Create fec object
-	fec q = fec_create(fs, NULL);
-	//fec_print(q);
-
-	// Encode meesage
-	fec_encode(q, n, data, msg_enc);
-
-	// Destroy the fec object
-	fec_destroy(q);
-
-	return msg_enc;
 }

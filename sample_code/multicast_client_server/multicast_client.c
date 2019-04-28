@@ -15,8 +15,6 @@ int sd;
 int datalen;
 char databuf[1035];
 
-char *client_fec(char *data, int length);
-
 int main(int argc, char *argv[])
 {
 	/* Create a datagram socket on which to receive. */
@@ -109,7 +107,7 @@ int main(int argc, char *argv[])
 		memset(databuf, 0, sizeof(databuf));
 	}
 
-	unsigned char recvbuf[1024];
+	unsigned char recvbuf[k];
 	fp = fopen(filePath, "wb");
 	if (fp == NULL)
 	{
@@ -118,9 +116,7 @@ int main(int argc, char *argv[])
 	}
 	/* Receive file */
 	long int number = 0;
-	char *saveptr = NULL;
-
-	unsigned int n = 1024;				  // original data length (bytes)
+	unsigned int n = 1040;				  // original data length (bytes)
 	fec_scheme fs = LIQUID_FEC_HAMMING74; // error-correcting scheme
 
 	// Create arrays
@@ -129,7 +125,10 @@ int main(int argc, char *argv[])
 	// Create fec object
 	fec q = fec_create(fs, NULL);
 	int bytes = 0;
-	while (bytes = read(sd, recvbuf, sizeof(recvbuf)))
+	char num_str[11] = {0};
+	char byte_str[5] = {0};
+	unsigned char writebuf[1025] = {0};
+	while (read(sd, recvbuf, sizeof(recvbuf)))
 	{
 		if (strcmp(recvbuf, "EOF") == 0)
 		{
@@ -138,14 +137,17 @@ int main(int argc, char *argv[])
 		}
 		else
 		{
-			/*strtok_r(databuf, "/", &saveptr);
-			number = strtol(databuf, NULL, 10);
-			printf("number = %ld\n", number);*/
-
 			number++;
+			//printf("number = %ld\n",number);
 			// Decode message
-			//fec_decode(q, n, recvbuf, msg_dec);
-			fwrite(recvbuf, sizeof(recvbuf), 1, fp);
+			fec_decode(q, n, recvbuf, msg_dec);
+			memcpy(num_str,msg_dec,sizeof(num_str));
+			printf("%s\n",num_str);
+			memcpy(byte_str,msg_dec+11,sizeof(byte_str));
+			printf("%s\n",byte_str);
+			bytes = atoi(byte_str);
+			fwrite(msg_dec+16, 1,bytes,fp);
+			//printf("bytes = %d\n",bytes);
 			memset(recvbuf, 0, sizeof(recvbuf));
 			memset(msg_dec, 0, sizeof(msg_dec));
 		}
@@ -155,25 +157,4 @@ int main(int argc, char *argv[])
 	fec_destroy(q);
 
 	return 0;
-}
-
-char *client_fec(char *data, int length)
-{
-	unsigned int n = length;			  // original data length (bytes)
-	fec_scheme fs = LIQUID_FEC_HAMMING74; // error-correcting scheme
-
-	// Create arrays
-	unsigned char msg_dec[n];
-
-	// Create fec object
-	fec q = fec_create(fs, NULL);
-	fec_print(q);
-
-	// Decode message
-	fec_decode(q, n, data, msg_dec);
-
-	// Destroy the fec object
-	fec_destroy(q);
-
-	return msg_dec;
 }
