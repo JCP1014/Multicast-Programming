@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 		printf("Reading length message...OK.\n");
 		//printf("The message from multicast server is: \"%s\"\n", databuf);
 		k = atoi(databuf);
-		printf("The k = %u\n", k);
+		//printf("The k = %u\n", k);
 		memset(databuf, 0, sizeof(databuf));
 	}
 
@@ -116,6 +116,9 @@ int main(int argc, char *argv[])
 	}
 	/* Receive file */
 	long int number = 0;
+	long int recv_num = 0;
+	long int correct_num = 0;
+	long int lost = 0;
 	unsigned int n = 1040;				  // original data length (bytes)
 	fec_scheme fs = LIQUID_FEC_HAMMING74; // error-correcting scheme
 
@@ -139,12 +142,19 @@ int main(int argc, char *argv[])
 		{
 			number++;
 			//printf("number = %ld\n",number);
+			correct_num++;
 			// Decode message
 			fec_decode(q, n, recvbuf, msg_dec);
 			memcpy(num_str,msg_dec,sizeof(num_str));
-			printf("%s\n",num_str);
+			recv_num = strtol(num_str,NULL,10);
+			if(recv_num != correct_num)
+			{
+				lost += recv_num-correct_num;
+				correct_num = recv_num;
+			}
+			//printf("%s\n",num_str);
 			memcpy(byte_str,msg_dec+11,sizeof(byte_str));
-			printf("%s\n",byte_str);
+			//printf("%s\n",byte_str);
 			bytes = atoi(byte_str);
 			fwrite(msg_dec+16, 1,bytes,fp);
 			//printf("bytes = %d\n",bytes);
@@ -152,7 +162,7 @@ int main(int argc, char *argv[])
 			memset(msg_dec, 0, sizeof(msg_dec));
 		}
 	}
-
+	printf("lost = %ld\n",lost);
 	// Destroy the fec object
 	fec_destroy(q);
 

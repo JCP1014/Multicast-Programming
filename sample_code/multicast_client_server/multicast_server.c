@@ -16,7 +16,7 @@ int sd;
 //char databuf[1024] = "Multicast test message.";
 char databuf[1035] = {0};
 int datalen = sizeof(databuf);
-char fileName[256] = "test_input.JPG";
+char fileName[256] = "video.mp4";
 
 int main(int argc, char *argv[])
 {
