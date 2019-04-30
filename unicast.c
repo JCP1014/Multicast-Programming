@@ -98,20 +98,21 @@ void udp_server(char *ip, int port, char fileName[256])
             error("ERROR sending to client");
 
         /* Read the file and send to the client */
-        long number = 0;
-        char num_str[11] = {0};
-        char byte_str[5] = {0};
-        FILE *fp = NULL;
-        unsigned char sendbuf[1040] = {0};
-        unsigned char readbuf[1024] = {0};
+        long number = 0;    // packet number
+        char num_str[11] = {0}; // packet number in string type 
+        char byte_str[5] = {0}; // valid sata length in string type
+        FILE *fp = NULL;    // file pointer
+        unsigned char sendbuf[1040] = {0};  // for send to socket
+        unsigned char readbuf[1024] = {0};  // for read file
 
         unsigned int n = sizeof(sendbuf);               // original data length (bytes)
         fec_scheme fs = LIQUID_FEC_HAMMING74;           // error-correcting scheme
         unsigned int k = fec_get_enc_msg_length(fs, n); // Compute sizeof encoded message
-        unsigned char msg_enc[k];
-        fec q = fec_create(fs, NULL);
-        char len_str[10];
-        snprintf(len_str, sizeof(len_str), "%u", k);
+        unsigned char msg_enc[k];   // encoded message
+        fec q = fec_create(fs, NULL);   // Create fec object
+        char len_str[10];   // length of encoded message in string type
+        snprintf(len_str, sizeof(len_str), "%u", k);    // Convert length of encoded message to string
+        // Tell the length of encoded message to client, so it know how long should it receive
         if (sendto(sock, len_str, sizeof(len_str), 0,
                    (struct sockaddr *)&peeraddr, peerlen) < 0)
         {
@@ -120,13 +121,14 @@ void udp_server(char *ip, int port, char fileName[256])
         //else
         //   printf("Sending length message...OK\n");
 
-        fp = fopen(fileName, "rb");
+        fp = fopen(fileName, "rb"); // Open file
         if (fp == NULL)
         {
             printf("Error openning file.\n");
             return;
         }
 
+        // Read file and send
         while (!feof(fp))
         {
             /* Set the serial number of this packet */
@@ -134,27 +136,28 @@ void udp_server(char *ip, int port, char fileName[256])
             snprintf(num_str, sizeof(num_str), "%010ld", number);
             //printf("number = %ld\n", strtol(num_str,NULL,10));
             printf("number = %s\n", num_str);
-            memcpy(sendbuf, num_str, sizeof(num_str));
+            memcpy(sendbuf, num_str, sizeof(num_str));  // Put the serial number into send buffer
             int bytes = fread(readbuf, 1, sizeof(readbuf), fp);
             snprintf(byte_str, sizeof(byte_str), "%04d", bytes);
-            memcpy(sendbuf + 11, byte_str, sizeof(num_str));
+            memcpy(sendbuf + 11, byte_str, sizeof(num_str));    // Put the valid data length into send buffer
             memcpy(sendbuf + 16, readbuf, sizeof(readbuf));
 
-            // Send the packet to the client
-            if (mode == 'f')
+            if (mode == 'f')    // Using FEC
             {
-                // Encode meesage
+                // Encode meesage and send
                 fec_encode(q, n, sendbuf, msg_enc);
                 sendto(sock, msg_enc, sizeof(msg_enc), 0,
                        (struct sockaddr *)&peeraddr, peerlen);
                 memset(msg_enc, 0, sizeof(msg_enc));
             }
-            else
+            else    // No FEC
             {
                 //printf("No FEC\n");
                 sendto(sock, sendbuf, sizeof(sendbuf), 0,
                        (struct sockaddr *)&peeraddr, peerlen);
             }
+
+            // Delay for reducing packet lost rate
             int i = 0;
             for (i = 0; i < 100000; i++)
             {
@@ -163,12 +166,13 @@ void udp_server(char *ip, int port, char fileName[256])
             memset(readbuf, 0, sizeof(readbuf));
             memset(sendbuf, 0, sizeof(sendbuf));
         }
-        fclose(fp);
+        fclose(fp); // Close file
         // Complete transfering the file
         printf("Completed\n");
-        // Destroy the fec object
-        fec_destroy(q);
+        fec_destroy(q); // Destroy the fec object
+        // Tell client the file is sended completely
         sendto(sock, "EOF", 3 * sizeof(char), 0, (struct sockaddr *)&peeraddr, peerlen);
+        // Send the serial number of the final packet for client to compute lost packet rate
         if (sendto(sock, num_str, sizeof(num_str), 0, (struct sockaddr *)&peeraddr, peerlen) < 0)
         {
             perror("Sending final packet number error");
@@ -176,6 +180,7 @@ void udp_server(char *ip, int port, char fileName[256])
         //else
         //    printf("Sending final packet number...OK\n");
 
+        // Get the original file size and send to client for computing lost data rate
         struct stat st;
         stat(fileName, &st);
         long int file_size = st.st_size;
@@ -213,8 +218,7 @@ void udp_client(char *ip, int port)
         error("sendto error");
 
     FILE *fp = NULL;
-    char filePath[1024] = "./Received/";
-    /* Read from the socket. */
+    char filePath[1024] = "./Received/";    // Save received file in "Received" directory
     char fileName[256];
     bzero(fileName, 256);
     memset(databuf, 0, sizeof(databuf)); // Clear the buffer
@@ -233,7 +237,7 @@ void udp_client(char *ip, int port)
         memset(databuf, 0, sizeof(databuf));
     }
 
-    /* Read the file name */
+    // Read how large is the encoded message
     unsigned int k = 0;
     if (recvfrom(sock, databuf, datalen, 0, (struct sockaddr *)&servaddr, &addr_len) < 0)
     {
@@ -244,11 +248,11 @@ void udp_client(char *ip, int port)
     else
     {
         //printf("Reading length message...OK.\n");
-        k = atoi(databuf);
+        k = atoi(databuf);  // Convert the string received to integer
         memset(databuf, 0, sizeof(databuf));
     }
 
-    unsigned char recvbuf[k];
+    unsigned char recvbuf[k];   // Create the receive buffer
     fp = fopen(filePath, "wb");
     if (fp == NULL)
     {
@@ -258,22 +262,23 @@ void udp_client(char *ip, int port)
 
     /* Receive file */
     long int number = 0;
-    long int recv_num = 0;
-    long int correct_num = 0;
-    long int lost_packet = 0;
-    long int total_packet = 0;
-    long int recv_data = 0;
-    long int total_data = 0;
+    long int recv_num = 0;  // serial number of the packet received
+    long int correct_num = 0;   // packet number that expected to receive
+    long int lost_packet = 0;   // number of lost packet
+    long int total_packet = 0;  // total number of packet should be received when no packet lost
+    long int recv_data = 0; // size of data received
+    long int total_data = 0;    // total size of data should be received when no data lost
     unsigned int n = 1040;                // original data length (bytes)
     fec_scheme fs = LIQUID_FEC_HAMMING74; // error-correcting scheme
     unsigned char msg_dec[n];
     fec q = fec_create(fs, NULL); // Create fec object
-    int bytes = 0;
-    char num_str[11] = {0};
-    char byte_str[5] = {0};
+    int bytes = 0;  // valid data length to write into file
+    char num_str[11] = {0}; // packet number in string type
+    char byte_str[5] = {0}; // valid data length in string type
+    // Read message
     while (recvfrom(sock, recvbuf, sizeof(recvbuf), 0, (struct sockaddr *)&servaddr, &addr_len))
     {
-        if (strcmp(recvbuf, "EOF") == 0)
+        if (strcmp(recvbuf, "EOF") == 0)    // If server has completed sending file
         {
             break;
         }
@@ -284,14 +289,13 @@ void udp_client(char *ip, int port)
             correct_num++;
             if (mode == 'f')
             {
-                // Decode message
-                fec_decode(q, n, recvbuf, msg_dec);
-                memcpy(num_str, msg_dec, sizeof(num_str));
-                recv_num = strtol(num_str, NULL, 10);
-                memcpy(byte_str, msg_dec + 11, sizeof(byte_str));
-                bytes = atoi(byte_str);
-                fwrite(msg_dec + 16, 1, bytes, fp);
-                memset(msg_dec, 0, sizeof(msg_dec));
+                fec_decode(q, n, recvbuf, msg_dec); // Decode message
+                memcpy(num_str, msg_dec, sizeof(num_str));  	// Read the serial number
+                recv_num = strtol(num_str, NULL, 10);   // Convert string into integer
+                memcpy(byte_str, msg_dec + 11, sizeof(byte_str));   // Read valid data length
+                bytes = atoi(byte_str); // Convert string to integer
+                fwrite(msg_dec + 16, 1, bytes, fp); // Write data into file
+                memset(msg_dec, 0, sizeof(msg_dec));    // Clear buffer
             }
             else
             {
@@ -301,17 +305,19 @@ void udp_client(char *ip, int port)
                 bytes = atoi(byte_str);
                 fwrite(recvbuf + 16, 1, bytes, fp);
             }
+            // Compute how many packet has lost
             if (recv_num != correct_num)
             {
-                lost_packet += recv_num - correct_num;
-                correct_num = recv_num;
-            }
-            memset(recvbuf, 0, sizeof(recvbuf));
+                lost_packet += (recv_num - correct_num);    // How many lost
+                correct_num = recv_num; // Update 
+            }   
+            memset(recvbuf, 0, sizeof(recvbuf));    // Clear buffer
         }
     }
-    fclose(fp);
+    fclose(fp); // Close file
     fec_destroy(q); // Destroy the fec object
 
+    // Read the total number of packet should be received originally
     if (recvfrom(sock, databuf, datalen, 0, (struct sockaddr *)&servaddr, &addr_len) < 0)
     {
         perror("Reading final packet number error");
@@ -322,10 +328,11 @@ void udp_client(char *ip, int port)
     {
         //printf("Reading final packet number...OK.\n");
         total_packet = strtol(databuf, NULL, 10);
-        printf("Packet lost = %ld\n", lost_packet);
-        printf("Packet lost rate = %f\n", (double)lost_packet / total_packet);
+        printf("Lost packet = %ld\n", lost_packet); // number of lost packet 
+        printf("Packet lost rate = %f\n", (double)lost_packet / total_packet);  // Compute packet lost rate
         memset(databuf, 0, sizeof(databuf));
     }
+    // Read the total size of original file 
     if (recvfrom(sock, databuf, datalen, 0, (struct sockaddr *)&servaddr, &addr_len) < 0)
     {
         perror("Reading file size error");
@@ -336,12 +343,13 @@ void udp_client(char *ip, int port)
     {
         //printf("Reading file size number...OK.\n");
         total_data = strtol(databuf, NULL, 10);
+        // Get the size of file that client write
         struct stat st;
         stat(filePath, &st);
         recv_data = st.st_size;
-        printf("Data received = %ld\n", recv_data);
-        printf("Data lost = %ld\n", total_data - recv_data);
-        printf("Data lost rate = %f\n", (double)(total_data - recv_data) / total_data);
+        printf("Received data size = %ld\n", recv_data);    // size of file that client write
+        printf("Lost data size = %ld\n", total_data - recv_data);   // Compute how many bytes of data are lost 
+        printf("Data lost rate = %f\n", (double)(total_data - recv_data) / total_data); // Compute data lost rate
         memset(databuf, 0, sizeof(databuf));
     }
     // Task is completed, close the socket

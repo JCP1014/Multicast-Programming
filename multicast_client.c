@@ -9,7 +9,7 @@
 #include <liquid/liquid.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#define port 4321
+#define port 6666
 
 struct sockaddr_in localSock;
 struct ip_mreq group;
@@ -81,10 +81,9 @@ int main(int argc, char *argv[])
 		printf("Adding multicast group...OK.\n");
 
 	FILE *fp = NULL;
-	char filePath[1024] = "./Received/";
-	/* Read from the socket. */
+	char filePath[1024] = "./Received/";	// Save received file in "Received" directory
 	datalen = sizeof(databuf);
-	/* Read the file name */
+	/* Read the file name from socket*/
 	if (read(sd, databuf, datalen) < 0)
 	{
 		perror("Reading fileName message error");
@@ -99,6 +98,7 @@ int main(int argc, char *argv[])
 		memset(databuf, 0, sizeof(databuf));
 	}
 
+	// Read how large is the encoded message
 	unsigned int k = 0;
 	if (read(sd, databuf, datalen) < 0)
 	{
@@ -109,11 +109,11 @@ int main(int argc, char *argv[])
 	else
 	{
 		//printf("Reading length message...OK.\n");
-		k = atoi(databuf);
-		memset(databuf, 0, sizeof(databuf));
+		k = atoi(databuf);	// Convert the string received to integer
+		memset(databuf, 0, sizeof(databuf));	// Clear buffer
 	}
 
-	unsigned char recvbuf[k];
+	unsigned char recvbuf[k];	// Create the receive buffer
 	fp = fopen(filePath, "wb");
 	if (fp == NULL)
 	{
@@ -123,22 +123,24 @@ int main(int argc, char *argv[])
 
 	/* Receive file */
 	long int number = 0;
-	long int recv_num = 0;
-	long int correct_num = 0;
-	long int lost_packet = 0;
-	long int total_packet = 0;
-	long int recv_data = 0;
-	long int total_data = 0;
+	long int recv_num = 0;	// serial number of the packet received
+	long int correct_num = 0;	// packet number that expected to receive
+	long int lost_packet = 0;	// number of lost packet
+	long int total_packet = 0;	// total number of packet should be received when no packet lost
+	long int recv_data = 0;	// size of data received
+	long int total_data = 0;	// total size of data should be received when no data lost
 	unsigned int n = 1040;				  // original data length (bytes)
 	fec_scheme fs = LIQUID_FEC_HAMMING74; // error-correcting scheme
-	unsigned char msg_dec[n];
+	unsigned char msg_dec[n];	// decoded message
 	fec q = fec_create(fs, NULL); // Create fec object
-	int bytes = 0;
-	char num_str[11] = {0};
-	char byte_str[5] = {0};
+	int bytes = 0;	// valid data length to write into file
+	char num_str[11] = {0};	// packet number in string type
+	char byte_str[5] = {0};	// valid data length in string type
+
+	// Read message
 	while (read(sd, recvbuf, sizeof(recvbuf)))
 	{
-		if (strcmp(recvbuf, "EOF") == 0)
+		if (strcmp(recvbuf, "EOF") == 0)	// If server has completed sending file
 		{
 			break;
 		}
@@ -149,14 +151,13 @@ int main(int argc, char *argv[])
 			correct_num++;
 			if (mode == 'f')
 			{
-				// Decode message
-				fec_decode(q, n, recvbuf, msg_dec);
-				memcpy(num_str, msg_dec, sizeof(num_str));
-				recv_num = strtol(num_str, NULL, 10);
-				memcpy(byte_str, msg_dec + 11, sizeof(byte_str));
-				bytes = atoi(byte_str);
-				fwrite(msg_dec + 16, 1, bytes, fp);
-				memset(msg_dec, 0, sizeof(msg_dec));
+				fec_decode(q, n, recvbuf, msg_dec);	// Decode message
+				memcpy(num_str, msg_dec, sizeof(num_str));	// Read the serial number
+				recv_num = strtol(num_str, NULL, 10);	// Convert string into integer
+				memcpy(byte_str, msg_dec + 11, sizeof(byte_str));	// Read valid data length
+				bytes = atoi(byte_str);	// Convert string to integer
+				fwrite(msg_dec + 16, 1, bytes, fp);	// Write data into file
+				memset(msg_dec, 0, sizeof(msg_dec));	// Clear buffer
 			}
 			else
 			{
@@ -167,17 +168,19 @@ int main(int argc, char *argv[])
 				bytes = atoi(byte_str);
 				fwrite(recvbuf + 16, 1, bytes, fp);
 			}
-			if (recv_num != correct_num)
+			// Compute how many packet has lost
+			if (recv_num != correct_num)	// If the received packet number is not as same as the number we expexted
 			{
-				lost_packet += recv_num - correct_num;
-				correct_num = recv_num;
+				lost_packet += recv_num - correct_num;	// How many lost
+				correct_num = recv_num;	// Update 
 			}
-			memset(recvbuf, 0, sizeof(recvbuf));
+			memset(recvbuf, 0, sizeof(recvbuf));	// Clear buffer
 		}
 	}
-	fclose(fp);
+	fclose(fp);	 // Close file
 	fec_destroy(q);	// Destroy the fec object
 
+	// Read the total number of packet should be received originally
 	if (read(sd, databuf, datalen) < 0)
 	{
 		perror("Reading final packet number error");
@@ -188,10 +191,11 @@ int main(int argc, char *argv[])
 	{
 		//printf("Reading final packet number...OK.\n");
 		total_packet = strtol(databuf, NULL, 10);
-		printf("Packet lost = %ld\n", lost_packet);
-		printf("Packet lost rate= %f\n", (double)lost_packet / total_packet);
+		printf("Lost packet = %ld\n", lost_packet);	// number of lost packet 
+		printf("Packet lost rate= %f\n", (double)lost_packet / total_packet); // Compute packet lost rate
 		memset(databuf, 0, sizeof(databuf));
 	}
+	// Read the total size of original file 
 	if (read(sd, databuf, datalen) < 0)
 	{
 		perror("Reading file size error");
@@ -202,14 +206,15 @@ int main(int argc, char *argv[])
 	{
 		//printf("Reading file size number...OK.\n");
 		total_data = strtol(databuf, NULL, 10);
+		// Get the size of file that client write
 		struct stat st;
 		stat(filePath, &st);
 		recv_data = st.st_size;
-		printf("Data received = %ld\n",recv_data);
-		printf("Data lost = %ld\n", total_data-recv_data);
-		printf("Data lost rate= %f\n", (double)(total_data-recv_data) / total_data);
+		printf("Received data size = %ld\n",recv_data);	// size of file that client write
+		printf("Lost data size = %ld\n", total_data-recv_data);	// Compute how many bytes of data are lost 
+		printf("Data lost rate = %f\n", (double)(total_data-recv_data) / total_data);	// Compute data lost rate
 		memset(databuf, 0, sizeof(databuf));
 	}
-	close(sd);
+	close(sd);	// Close socket
 	return 0;
 }

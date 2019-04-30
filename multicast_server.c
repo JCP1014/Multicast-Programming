@@ -10,7 +10,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#define port 4321
+#define port 6666
 
 struct in_addr localInterface;
 struct sockaddr_in groupSock;
@@ -18,12 +18,13 @@ int sd;
 
 int main(int argc, char *argv[])
 {
-	char mode = 'f';
+	char mode = 'f';	// 'f': using FEC / 'n': no FEC 
 	char IP[16] = "10.0.2.15";
 	char fileName[256] = "test_input.JPG";
-	int trigger = 15;
-	time_t start;
-
+	int trigger = 15;	// Send data after how many seconds
+	time_t start;	// for recording the time at which server starts
+ 
+	// Read arguments
 	if (argc >= 2)
 		(strcmp(argv[1],"n")==0) ? (mode = 'n') : (mode = 'f');
 	if (argc >= 3)
@@ -66,12 +67,12 @@ int main(int argc, char *argv[])
 	/* Send a message to the multicast group specified by the*/
 	/* groupSock sockaddr structure. */
 
-	start = time(NULL);
-	/* Send file name */
+	start = time(NULL);	// Record when server starts
 	while (1)
 	{
-		if (time(NULL) - start >= trigger)
+		if (time(NULL) - start >= trigger)	// If it is time to trigger multicast event
 		{
+			// Tell client the file name
 			if (sendto(sd, fileName, sizeof(fileName), 0, (struct sockaddr *)&groupSock, sizeof(groupSock)) < 0)
 			{
 				perror("Sending fileName message error");
@@ -79,20 +80,21 @@ int main(int argc, char *argv[])
 			//else
 			//	printf("Sending fileName message...OK\n");
 
-			long number = 0;
-			char num_str[11] = {0};
-			char byte_str[5] = {0};
-			FILE *fp = NULL;
-			unsigned char sendbuf[1040] = {0};
-			unsigned char readbuf[1024] = {0};
+			long number = 0;	// packet number
+			char num_str[11] = {0};	// packet number in string type 
+			char byte_str[5] = {0};	// valid sata length in string type
+			FILE *fp = NULL;	// file pointer
+			unsigned char sendbuf[1040] = {0};	// for send to socket
+			unsigned char readbuf[1024] = {0};	// for read file
 
 			unsigned int n = sizeof(sendbuf);				// original data length (bytes)
 			fec_scheme fs = LIQUID_FEC_HAMMING74;			// error-correcting scheme
 			unsigned int k = fec_get_enc_msg_length(fs, n); // Compute sizeof encoded message
-			unsigned char msg_enc[k];
-			fec q = fec_create(fs, NULL);
-			char len_str[10];
-			snprintf(len_str, sizeof(len_str), "%u", k);
+			unsigned char msg_enc[k];	// encoded message
+			fec q = fec_create(fs, NULL);	// Create fec object
+			char len_str[10];	// length of encoded message in string type
+			snprintf(len_str, sizeof(len_str), "%u", k);	// Convert length of encoded message to string
+			// Tell the length of encoded message to client, so it know how long should it receive
 			if (sendto(sd, len_str, sizeof(len_str), 0, (struct sockaddr *)&groupSock, sizeof(groupSock)) < 0)
 			{
 				perror("Sending length message error");
@@ -100,14 +102,14 @@ int main(int argc, char *argv[])
 			//else
 			//	printf("Sending length message...OK\n");
 
-			/* Send file */
-			fp = fopen(fileName, "rb");
+			fp = fopen(fileName, "rb"); // Open file
 			if (fp == NULL)
 			{
 				printf("Error openning file.\n");
 				return -1;
 			}
 
+			// Read file and send
 			while (!feof(fp))
 			{
 				/* Set the serial number of this packet */
@@ -115,31 +117,33 @@ int main(int argc, char *argv[])
 				snprintf(num_str, sizeof(num_str), "%010ld", number);
 				//printf("number = %ld\n", strtol(num_str,NULL,10));
 				printf("number = %s\n", num_str);
-				memcpy(sendbuf, num_str, sizeof(num_str));
+				memcpy(sendbuf, num_str, sizeof(num_str));	// Put the serial number into send buffer
 				int bytes = fread(readbuf, 1, sizeof(readbuf), fp);
 				snprintf(byte_str, sizeof(byte_str), "%04d", bytes);
-				memcpy(sendbuf + 11, byte_str, sizeof(num_str));
+				memcpy(sendbuf + 11, byte_str, sizeof(num_str));	// Put the valid data length into send buffer
 				memcpy(sendbuf + 16, readbuf, sizeof(readbuf));
 
-				if (mode == 'f')
+				if (mode == 'f')	// Using FEC
 				{
-					// Encode meesage
+					// Encode meesage and send
 					fec_encode(q, n, sendbuf, msg_enc);
 					sendto(sd, msg_enc, sizeof(msg_enc), 0, (struct sockaddr *)&groupSock, sizeof(groupSock));
-					memset(msg_enc, 0, sizeof(msg_enc));
-				}
-				else
+					memset(msg_enc, 0, sizeof(msg_enc));	// Clear buffer
+				} 
+				else	// No FEC
 				{
 					//printf("No FEC\n");
 					sendto(sd,sendbuf,sizeof(sendbuf), 0, (struct sockaddr *)&groupSock, sizeof(groupSock))	;
 				}
+				// Clear buffer
 				memset(readbuf, 0, sizeof(readbuf));
 				memset(sendbuf, 0, sizeof(sendbuf));
 			}
-			fclose(fp);
-			// Destroy the fec object
-			fec_destroy(q);
+			fclose(fp);	// Close file
+			fec_destroy(q);	// Destroy the fec object
+			// Tell client the file is sended completely
 			sendto(sd, "EOF", 3*sizeof(char), 0, (struct sockaddr *)&groupSock, sizeof(groupSock));
+			// Send the serial number of the final packet for client to compute lost packet rate
 			if (sendto(sd, num_str, sizeof(num_str), 0, (struct sockaddr *)&groupSock, sizeof(groupSock)) < 0)
 			{
 				perror("Sending final packet number error");
@@ -147,6 +151,7 @@ int main(int argc, char *argv[])
 			//else
 			//	printf("Sending final packet number...OK\n");
 
+			// Get the original file size and send to client for computing lost data rate
 			struct stat st;
 			stat(fileName, &st);
 			long int file_size = st.st_size;
@@ -164,6 +169,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	close(sd);
+	close(sd);	// Close socket
 	return 0;
 }
